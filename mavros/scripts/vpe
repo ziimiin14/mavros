@@ -1,0 +1,155 @@
+#!/usr/bin/env python
+# vim:set ts=4 sw=4 et:
+#
+# Copyright 2015 UAVenture AG.
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+# or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+# for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
+# Updated: Tarek Taha : tarek.taha@kustar.ac.ae, Vladimir Ermakov
+#    - Changed topic names after re-factoring : https://github.com/mavlink/mavros/issues/233
+#    - Use mavros.setpoint module for topics
+
+import rospy
+#import threading
+#import thread
+
+import numpy as np
+
+#from math import *
+#from mavros.utils import *
+#from mavros import setpoint as SP
+from geometry_msgs.msg import PoseStamped
+from mavros_msgs.msg import OpticalFlowRad
+from sensor_msgs.msg import Range, Imu
+from std_msgs.msg import Header #type 
+#from std_msgs.msg import Float64, Float32 #type from msg generation
+#from geometry_msgs.msg import PoseStamped, Quaternion, TwistStamped #geometry
+from tf.transformations import quaternion_from_euler #transformation
+#from mavros_msgs.srv import CommandLong #service_class
+#from sensor_msgs.msg import NavSatFix #type
+
+
+class VisionPositionEstimate:
+
+    def __init__(self):
+        self.roll = 0
+        self.pitch = 0
+        self.yaw = 0
+        self.x = 0
+        self.y = 0
+        self.z = 0
+        self.startx = 3.5 # relative to the wall
+        self.starty = 0
+        self.startz = 0
+        self.quatx = 0
+        self.quaty = 0
+        self.quatz = 0
+        self.quatw = 0
+
+        # Subscriber for Lidar
+        rospy.Subscriber('/distance_sensor/lidar0',Range,self.lidar_callback)
+        rospy.Subscriber('/distance_sensor/lidar1',Range,self.lidar_callback)
+        rospy.Subscriber('/distance_sensor/lidar2',Range,self.lidar_callback)
+        rospy.Subscriber('/distance_sensor/lidar3',Range,self.lidar_callback)
+        
+        # Subscriber for Imu
+        rospy.Subscriber('/mavros/imu/data',Imu,self.imu_callback)
+
+        # Subscriber for Optical Flow
+        rospy.Subscriber('/mavros/px4flow/raw/optical_flow_rad',OpticalFlowRad,self.of_callback)
+
+        #Publisher for Vision Position Estimate
+        self.vpe_pub = rospy.Publisher('/mavros/vision_pose/pose',PoseStamped,queue_size=10)
+
+        self.rate= rospy.Rate(45)
+        self.lidar = [Range()]*4
+        #self.lidar0 = Range()
+        #self.lidar1 = Range()
+        #self.lidar2 = Range()
+        #self.lidar3 = Range()
+        
+        self.imu = Imu()
+
+        self.opticalFlow = OpticalFlowRad()
+
+        while not rospy.is_shutdown(): #subsequent functions below are run automatically using this while loop (inert functions) 
+            
+            self.vision_pose() 
+            self.rate.sleep()
+
+    
+    def lidar_callback(self,data):
+        
+        #rospy.loginfo('Current Range(%s):[%f]',data.header.frame_id,data.range)
+        x = int(data.header.frame_id[5])
+        self.lidar[x] = data
+        
+    def imu_callback(self,data):
+        
+        #rospy.loginfo('Roll Rate: [%f], Pitch Rate: [%f], Yaw Rate: [%f]', data.angular_velocity.x,data.angular_velocity.y,data.angular_velocity.z)
+        self.imu = data
+
+    def of_callback(self,data):
+
+        #rospy.loginfo('z_flow(rad): [%f], y_flow(rad): [%f]', data.integrated_x, data.integrated_y)
+        #rospy.loginfo('Time1: [%f], Time2: [%f]',data.integration_time_us, data.time_delta_distance_us)
+        self.opticalFlow=data
+
+    # Algorithm to deal with sensor data and compute the desired data which will be sent to vpe publisher
+    def vision_pose(self):
+        #dt = rospy.Time.now() - self.time_start
+        x0,x1,x2,x3 =[self.lidar[x].range for x in range(len(self.lidar))]
+        offset = 0.06
+        #time = self.opticalFlow.integration_time_us/1000000
+        x0 = x0+ offset
+        x1 = x1+ offset
+        x2 = x2+ offset
+        x3 = x3+ offset
+        
+        self.x =  self.startx - np.mean([x0,x1,x2,x3])
+        self.y = self.y +(self.opticalFlow.integrated_y*3.4)
+        self.z = self.z+(self.opticalFlow.integrated_x*3.4)
+        self.quat = self.imu.orientation
+
+        rospy.loginfo('x:[%f],y:[%f],z:[%f]',self.x,self.y,self.z)
+
+        # Initialise necessary headers
+        pos = PoseStamped()
+        pos.header = Header()
+        pos.header.frame_id = "vision_pose"
+
+        # Establish desired setpoints
+        pos.pose.position.x = self.x
+        pos.pose.position.y = self.y
+        pos.pose.position.z = self.z
+
+        # Establish desired attitude towards vision position estimate
+        #pos.pose.orientation = Quaternion(*self.quat)
+        pos.pose.orientation = self.quat
+
+        # Publishing to rostopic
+        # Update timestamp for each published SP
+        pos.header.stamp = rospy.Time.now()
+        self.vpe_pub.publish(pos) # updated pose from pos.pose.orientation
+        #rospy.loginfo(self.z)
+        #self.time_start = rospy.Time.now()+1/10
+        #rospy.loginfo(self.quat)
+
+
+if __name__ == '__main__':
+    rospy.init_node('vpe_test_node',anonymous =True)
+
+    node = VisionPositionEstimate()
+
+    rospy.spin()

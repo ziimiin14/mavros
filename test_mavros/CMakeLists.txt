@@ -95,6 +95,20 @@ target_link_libraries(
   mavros_sitl_test
 )
 
+add_executable(sensor_read_node
+  sitl_test/sensor_read_node
+)
+
+add_dependencies(
+  sensor_read_node
+  mavros_sitl_test
+)
+
+target_link_libraries(sensor_read_node
+  mavros_sitl_test
+
+)
+
 #############
 ## Install ##
 #############

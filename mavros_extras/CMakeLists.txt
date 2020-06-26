@@ -110,6 +110,20 @@ target_link_libraries(servo_state_publisher
   ${catkin_LIBRARIES}
 )
 
+add_executable(offb_vpe
+  src/offb_vpe.cpp
+)
+target_link_libraries(offb_vpe
+  ${catkin_LIBRARIES}
+)
+
+add_executable(vpe_1
+  src/vpe_1.cpp
+)
+target_link_libraries(vpe_1
+  ${catkin_LIBRARIES}
+)
+
 #############
 ## Install ##
 #############
